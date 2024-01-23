@@ -174,7 +174,8 @@ class TwoClustersMIP(BaseModel):
         self.L=n_pieces
         self.K=n_clusters
         self.seed = 123
-        self.model = self.instantiate()
+        # self.model = self.instantiate()
+        self.model = Model("UTA model")
         self.criterions = 4
 
     def instantiate(self):
@@ -195,35 +196,49 @@ class TwoClustersMIP(BaseModel):
         Y: np.ndarray
             (n_samples, n_features) features of unchosen elements
         """
-        breakpoints= [(1/(self.L))*i for i in range(self.L+1)]
-        model = Model("UTA model")
 
-        P= len(X)
-        I = model.addVars(P, self.K, vtype=GRB.BINARY,name="I")
-        M= 10
-        e=10^-3
+        self.breakpoints= [(1/(self.L))*i for i in range(self.L+1)]
+       
+
+        P = len(X)
+        I = self.model.addVars(P, self.K, vtype=GRB.BINARY, name="I")
+        M = 10
+        e = 10^-3
+        sigma = self.model.addVars(P, self.K, vtype=GRB.INFINITY, name="sigma")
+
         # Variables for utility at each breakpoint
-        breakpoint_utils = model.addVars(self.K, self.criterions, self.L+1, lb=0, ub=GRB.INFINITY, name="breakpoint_utils")
-
-        # Variables for slopes between breakpoints
-        slopes = model.addVars(self.K, self.criterions, self.L, lb=-GRB.INFINITY, ub=GRB.INFINITY, name="slopes")
+        breakpoint_utils = self.model.addVars(self.K, self.criterions, self.L+1, lb=0, ub=GRB.INFINITY, name="breakpoint_utils")
 
         # Constraints for linear segments
         for k in range(self.K):
             for i in range(self.criterions):
                 for b in range(self.L):
-                    # Constraint for the slope between breakpoint b and b+1
-                    model.addConstr((breakpoint_utils[k, i, b+1] - breakpoint_utils[k, i, b]) / (breakpoints[k, i, b+1] - breakpoints[k, i, b]) == slopes[k,i,b])
-       
-        for p in range(len(X)):
-            model.addConstr(sum(I[p, k] for k in range(self.K)) >= 1)
+                    self.model.addConstr((breakpoint_utils[k, i, b+1] - breakpoint_utils[k, i, b]) >=0)
+
+        # Function to calculate utility
+        def calculate_utility(k, features):
+            utility = 0
+            for i, feature in enumerate(features):
+                for b in range(self.L):
+                    if self.breakpoints[b] <= feature < self.breakpoints[b + 1]:
+                        utility += breakpoint_utils[k, i, b] + ((breakpoint_utils[k, i, b+1]-breakpoint_utils[k, i, b])/(self.breakpoints[b+1]-self.breakpoints[b])) * (feature - self.breakpoints[b])
+                        break
+            return utility
+
+        # Utility difference constraint
+        for p in range(P):
+            self.model.addConstr(sum(I[p, k] for k in range(self.K)) >= 1)
             for k in range(self.K):
-                model.addConstr(M(1-I[p,k])+uk(X[i])-uk(Y[i])-e >=0)
-                
-                
-
-
+                self.model.addConstr(M * (1 - I[p, k]) + calculate_utility(k, X[p]) - calculate_utility(k, Y[p]) - e +sigma[p,k]>= 0)
+        somme=0
+        for p in range(P):
+            for k in range(self.k):
+                somme+= sigma[p,k]
+        self.model.setObjective(somme, GRB.MINIMIZE)
+        # Additional constraints and optimization
         # To be completed
+        self.model.optimize()
+
         return
 
     def predict_utility(self, X):
@@ -234,9 +249,20 @@ class TwoClustersMIP(BaseModel):
         X: np.ndarray
             (n_samples, n_features) list of features of elements
         """
+        value=[]
+        for p in range(len(X)):
+            utility = 0
+            for k in range(self.K):
+                for i, feature in enumerate(X[p]):
+                    for b in range(self.L):
+                        if self.breakpoints[b] <= feature < self.breakpoints[b + 1]:
+                            utility += self.model.breakpoint_utils[k, i, b] + ((self.model.breakpoint_utils[k, i, b+1]-self.model.breakpoint_utils[k, i, b])/(self.breakpoints[b+1]-self.breakpoints[b])) * (feature - self.breakpoints[b])
+                            break
+            value.append(utility)
+        return value
         # To be completed
         # Do not forget that this method is called in predict_preference (line 42) and therefor should return well-organized data for it to work.
-        return
+
 
 
 class HeuristicModel(BaseModel):
