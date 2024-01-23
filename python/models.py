@@ -201,19 +201,31 @@ class TwoClustersMIP(BaseModel):
        
 
         P = len(X)
-        I = self.model.addVars(P, self.K, vtype=GRB.BINARY, name="I")
+        # I = self.model.addVars(P, self.K, vtype=GRB.BINARY, name="I")
+        I={}
+        for p in range(P):
+            for k in range(self.K):
+                I[p,k] = self.model.addVar(vtype=GRB.BINARY)
         M = 10
         e = 10^-3
-        sigma = self.model.addVars(P, self.K, vtype=GRB.INFINITY, name="sigma")
+        sigma = {}
+        for p in range(P):
+            for k in range(self.K):
+                sigma[p, k] = self.model.addVar(vtype=GRB.CONTINUOUS)
 
         # Variables for utility at each breakpoint
-        breakpoint_utils = self.model.addVars(self.K, self.criterions, self.L+1, lb=0, ub=GRB.INFINITY, name="breakpoint_utils")
-
+        # breakpoint_utils = self.model.addVars(self.K, self.criterions, self.L+1, lb=0, ub=GRB.INFINITY, name="breakpoint_utils")
+        self.breakpoint_utils= {}
+        for k in range(self.K):
+            for n in range(self.criterions):
+                for l in range(self.L +1):
+                    self.breakpoint_utils[k,n,l] = self.model.addVar(vtype=GRB.CONTINUOUS)
+        
         # Constraints for linear segments
         for k in range(self.K):
             for i in range(self.criterions):
                 for b in range(self.L):
-                    self.model.addConstr((breakpoint_utils[k, i, b+1] - breakpoint_utils[k, i, b]) >=0)
+                    self.model.addConstr((self.breakpoint_utils[k, i, b+1] - self.breakpoint_utils[k, i, b]) >=0)
 
         # Function to calculate utility
         def calculate_utility(k, features):
@@ -221,7 +233,7 @@ class TwoClustersMIP(BaseModel):
             for i, feature in enumerate(features):
                 for b in range(self.L):
                     if self.breakpoints[b] <= feature < self.breakpoints[b + 1]:
-                        utility += breakpoint_utils[k, i, b] + ((breakpoint_utils[k, i, b+1]-breakpoint_utils[k, i, b])/(self.breakpoints[b+1]-self.breakpoints[b])) * (feature - self.breakpoints[b])
+                        utility += self.breakpoint_utils[k, i, b] + ((self.breakpoint_utils[k, i, b+1]-self.breakpoint_utils[k, i, b])/(self.breakpoints[b+1]-self.breakpoints[b])) * (feature - self.breakpoints[b])
                         break
             return utility
 
@@ -232,7 +244,7 @@ class TwoClustersMIP(BaseModel):
                 self.model.addConstr(M * (1 - I[p, k]) + calculate_utility(k, X[p]) - calculate_utility(k, Y[p]) - e +sigma[p,k]>= 0)
         somme=0
         for p in range(P):
-            for k in range(self.k):
+            for k in range(self.K):
                 somme+= sigma[p,k]
         self.model.setObjective(somme, GRB.MINIMIZE)
         # Additional constraints and optimization
@@ -251,15 +263,18 @@ class TwoClustersMIP(BaseModel):
         """
         value=[]
         for p in range(len(X)):
-            utility = 0
+            utility = []
             for k in range(self.K):
+                score=0
                 for i, feature in enumerate(X[p]):
                     for b in range(self.L):
                         if self.breakpoints[b] <= feature < self.breakpoints[b + 1]:
-                            utility += self.model.breakpoint_utils[k, i, b] + ((self.model.breakpoint_utils[k, i, b+1]-self.model.breakpoint_utils[k, i, b])/(self.breakpoints[b+1]-self.breakpoints[b])) * (feature - self.breakpoints[b])
+                            score += self.breakpoint_utils[k, i, b].X + ((self.breakpoint_utils[k, i, b+1].X-self.breakpoint_utils[k, i, b].X)/(self.breakpoints[b+1]-self.breakpoints[b])) * (feature - self.breakpoints[b])
+                        
                             break
-            value.append(utility)
-        return value
+                utility.append(score)
+            value.append(utility)               
+        return np.stack(value, axis=0)
         # To be completed
         # Do not forget that this method is called in predict_preference (line 42) and therefor should return well-organized data for it to work.
 
