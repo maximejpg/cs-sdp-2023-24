@@ -75,7 +75,10 @@ class PairsExplained(BaseMetric):
         """
         Ux = model.predict_utility(X)
         Uy = model.predict_utility(Y)
+        Ux = np.array(Ux)  # Convertir en numpy.ndarray
+        Uy = np.array(Uy)  # Convertir en numpy.ndarray
         return self(Ux, Uy)
+
 
 
 class ClusterIntersection(BaseMetric):

@@ -38,8 +38,11 @@ class BaseModel(object):
         X: np.ndarray
             (n_samples, n_features) list of features of elements
         """
-        # Customize what happens in the predict utility function
-        return
+        # Add your own implementation here
+        # For example, you can use the predict method of your model to calculate the utility
+        utility = self.model.predict(X)
+
+        return utility
 
     def predict_preference(self, X, Y):
         """Method to predict which pair is preferred between X[i] and Y[i] for all i.
@@ -183,7 +186,6 @@ class TwoClustersMIP(BaseModel):
         weights_1 = np.full(self.criterions, 1/self.criterions)
         weights_2 = np.full(self.criterions, 1/self.criterions)
         self.weights = [weights_1, weights_2]
-        # To be completed
         return
 
     def fit(self, X, Y):
@@ -201,14 +203,25 @@ class TwoClustersMIP(BaseModel):
        
 
         P = len(X)
-        I = self.model.addVars(P, self.K, vtype=GRB.BINARY, name="I")
+        I={}
+        for p in range(P):
+            for k in range(self.K):
+                I[p, k] = self.model.addVar(vtype=GRB.BINARY, name=f"I_{p}_{k}")
         M = 10
-        e = 10^-3
-        sigma = self.model.addVars(P, self.K, vtype=GRB.INFINITY, name="sigma")
+        e = 10**-3
+        sigma = {}
+        for p in range(P):
+            for k in range(self.K):
+                sigma[p, k] = self.model.addVar(lb=0, ub=GRB.INFINITY, vtype=GRB.CONTINUOUS, name=f"sigma_{p}_{k}")
 
+        somme=0
         # Variables for utility at each breakpoint
-        breakpoint_utils = self.model.addVars(self.K, self.criterions, self.L+1, lb=0, ub=GRB.INFINITY, name="breakpoint_utils")
-
+        breakpoint_utils={}
+        for k in range(self.K):
+            for i in range(self.criterions):
+                for b in range(self.L+1):
+                    breakpoint_utils[k, i, b] = self.model.addVar(lb=0, ub=GRB.INFINITY, vtype=GRB.CONTINUOUS, name=f"breakpoint_utils_{k}_{i}_{b}")
+        
         # Constraints for linear segments
         for k in range(self.K):
             for i in range(self.criterions):
@@ -230,36 +243,32 @@ class TwoClustersMIP(BaseModel):
             self.model.addConstr(sum(I[p, k] for k in range(self.K)) >= 1)
             for k in range(self.K):
                 self.model.addConstr(M * (1 - I[p, k]) + calculate_utility(k, X[p]) - calculate_utility(k, Y[p]) - e +sigma[p,k]>= 0)
-        somme=0
         for p in range(P):
-            for k in range(self.k):
+            for k in range(self.K):
                 somme+= sigma[p,k]
         self.model.setObjective(somme, GRB.MINIMIZE)
-        # Additional constraints and optimization
-        # To be completed
+        self.breakpoint_utils = breakpoint_utils
         self.model.optimize()
 
         return
 
     def predict_utility(self, X):
-        """Return Decision Function of the MIP for X. - To be completed.
-
-        Parameters:
-        -----------
-        X: np.ndarray
-            (n_samples, n_features) list of features of elements
-        """
-        value=[]
+        utilities = np.zeros((len(X), self.K))  # Tableau 2D: lignes pour les échantillons, colonnes pour les clusters
         for p in range(len(X)):
-            utility = 0
             for k in range(self.K):
+                utility = 0
                 for i, feature in enumerate(X[p]):
                     for b in range(self.L):
                         if self.breakpoints[b] <= feature < self.breakpoints[b + 1]:
-                            utility += self.model.breakpoint_utils[k, i, b] + ((self.model.breakpoint_utils[k, i, b+1]-self.model.breakpoint_utils[k, i, b])/(self.breakpoints[b+1]-self.breakpoints[b])) * (feature - self.breakpoints[b])
+                            # Calculer l'utilité pour chaque cluster séparément
+                            utility += self.breakpoint_utils[k, i, b].X + ((self.breakpoint_utils[k, i, b+1].X - self.breakpoint_utils[k, i, b].X) / (self.breakpoints[b+1] - self.breakpoints[b])) * (feature - self.breakpoints[b])
                             break
-            value.append(utility)
-        return value
+                utilities[p, k] = utility  # Stocker l'utilité de l'échantillon 'p' pour le cluster 'k'
+        return utilities
+
+
+
+
         # To be completed
         # Do not forget that this method is called in predict_preference (line 42) and therefor should return well-organized data for it to work.
 
