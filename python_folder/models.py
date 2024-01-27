@@ -203,7 +203,6 @@ class TwoClustersMIP(BaseModel):
        
 
         P = len(X)
-<<<<<<< HEAD:python_folder/models.py
         I={}
         for p in range(P):
             for k in range(self.K):
@@ -214,42 +213,20 @@ class TwoClustersMIP(BaseModel):
         for p in range(P):
             for k in range(self.K):
                 sigma[p, k] = self.model.addVar(lb=0, ub=GRB.INFINITY, vtype=GRB.CONTINUOUS, name=f"sigma_{p}_{k}")
-=======
-        # I = self.model.addVars(P, self.K, vtype=GRB.BINARY, name="I")
-        I={}
-        for p in range(P):
-            for k in range(self.K):
-                I[p,k] = self.model.addVar(vtype=GRB.BINARY)
-        M = 10
-        e = 10^-3
-        sigma = {}
-        for p in range(P):
-            for k in range(self.K):
-                sigma[p, k] = self.model.addVar(vtype=GRB.CONTINUOUS)
->>>>>>> 28c36e876a5bd08659c95b6afa54c4d5bb178180:python/models.py
 
         somme=0
         # Variables for utility at each breakpoint
-<<<<<<< HEAD:python_folder/models.py
         breakpoint_utils={}
         for k in range(self.K):
             for i in range(self.criterions):
                 for b in range(self.L+1):
                     breakpoint_utils[k, i, b] = self.model.addVar(lb=0, ub=GRB.INFINITY, vtype=GRB.CONTINUOUS, name=f"breakpoint_utils_{k}_{i}_{b}")
-=======
-        # breakpoint_utils = self.model.addVars(self.K, self.criterions, self.L+1, lb=0, ub=GRB.INFINITY, name="breakpoint_utils")
-        self.breakpoint_utils= {}
-        for k in range(self.K):
-            for n in range(self.criterions):
-                for l in range(self.L +1):
-                    self.breakpoint_utils[k,n,l] = self.model.addVar(vtype=GRB.CONTINUOUS)
->>>>>>> 28c36e876a5bd08659c95b6afa54c4d5bb178180:python/models.py
         
         # Constraints for linear segments
         for k in range(self.K):
             for i in range(self.criterions):
                 for b in range(self.L):
-                    self.model.addConstr((self.breakpoint_utils[k, i, b+1] - self.breakpoint_utils[k, i, b]) >=0)
+                    self.model.addConstr((breakpoint_utils[k, i, b+1] - breakpoint_utils[k, i, b]) >=0)
 
         # Function to calculate utility
         def calculate_utility(k, features):
@@ -257,7 +234,7 @@ class TwoClustersMIP(BaseModel):
             for i, feature in enumerate(features):
                 for b in range(self.L):
                     if self.breakpoints[b] <= feature < self.breakpoints[b + 1]:
-                        utility += self.breakpoint_utils[k, i, b] + ((self.breakpoint_utils[k, i, b+1]-self.breakpoint_utils[k, i, b])/(self.breakpoints[b+1]-self.breakpoints[b])) * (feature - self.breakpoints[b])
+                        utility += breakpoint_utils[k, i, b] + ((breakpoint_utils[k, i, b+1]-breakpoint_utils[k, i, b])/(self.breakpoints[b+1]-self.breakpoints[b])) * (feature - self.breakpoints[b])
                         break
             return utility
 
@@ -278,7 +255,6 @@ class TwoClustersMIP(BaseModel):
     def predict_utility(self, X):
         utilities = np.zeros((len(X), self.K))  # Tableau 2D: lignes pour les échantillons, colonnes pour les clusters
         for p in range(len(X)):
-<<<<<<< HEAD:python_folder/models.py
             for k in range(self.K):
                 utility = 0
                 for i, feature in enumerate(X[p]):
@@ -293,20 +269,6 @@ class TwoClustersMIP(BaseModel):
 
 
 
-=======
-            utility = []
-            for k in range(self.K):
-                score=0
-                for i, feature in enumerate(X[p]):
-                    for b in range(self.L):
-                        if self.breakpoints[b] <= feature < self.breakpoints[b + 1]:
-                            score += self.breakpoint_utils[k, i, b].X + ((self.breakpoint_utils[k, i, b+1].X-self.breakpoint_utils[k, i, b].X)/(self.breakpoints[b+1]-self.breakpoints[b])) * (feature - self.breakpoints[b])
-                        
-                            break
-                utility.append(score)
-            value.append(utility)               
-        return np.stack(value, axis=0)
->>>>>>> 28c36e876a5bd08659c95b6afa54c4d5bb178180:python/models.py
         # To be completed
         # Do not forget that this method is called in predict_preference (line 42) and therefor should return well-organized data for it to work.
 
