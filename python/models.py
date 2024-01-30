@@ -198,7 +198,7 @@ class TwoClustersMIP(BaseModel):
         """
 
         self.breakpoints= [(1/(self.L))*i for i in range(self.L+1)]
-       
+
 
         P = len(X)
         # I = self.model.addVars(P, self.K, vtype=GRB.BINARY, name="I")
@@ -220,7 +220,7 @@ class TwoClustersMIP(BaseModel):
             for n in range(self.criterions):
                 for l in range(self.L +1):
                     self.breakpoint_utils[k,n,l] = self.model.addVar(vtype=GRB.CONTINUOUS)
-        
+
         # Constraints for linear segments
         for k in range(self.K):
             for i in range(self.criterions):
@@ -270,10 +270,10 @@ class TwoClustersMIP(BaseModel):
                     for b in range(self.L):
                         if self.breakpoints[b] <= feature < self.breakpoints[b + 1]:
                             score += self.breakpoint_utils[k, i, b].X + ((self.breakpoint_utils[k, i, b+1].X-self.breakpoint_utils[k, i, b].X)/(self.breakpoints[b+1]-self.breakpoints[b])) * (feature - self.breakpoints[b])
-                        
+
                             break
                 utility.append(score)
-            value.append(utility)               
+            value.append(utility)
         return np.stack(value, axis=0)
         # To be completed
         # Do not forget that this method is called in predict_preference (line 42) and therefor should return well-organized data for it to work.
