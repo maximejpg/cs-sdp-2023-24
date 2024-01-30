@@ -272,23 +272,69 @@ class TwoClustersMIP(BaseModel):
         # To be completed
         # Do not forget that this method is called in predict_preference (line 42) and therefor should return well-organized data for it to work.
 
-
+import keras
+from keras import backend
+from keras.layers import Activation, Add, Dense, Input, Lambda, Dropout, Subtract
+from keras.models import Model, Sequential
+from keras.utils import plot_model
 
 class HeuristicModel(BaseModel):
     """Skeleton of MIP you have to write as the first exercise.
     You have to encapsulate your code within this class that will be called for evaluation.
     """
+    def create_base_network(self):
+        '''Base network to be shared (eq. to feature extraction).
+        '''
+        seq = Sequential()
+        seq.add(Dense(self.INPUT_DIM, input_shape=(self.INPUT_DIM,), activation='relu'))
+        seq.add(Dropout(0.1))
+        seq.add(Dense(64, activation='relu'))
+        seq.add(Dropout(0.1))
+        seq.add(Dense(32, activation='relu'))
+        seq.add(Dense(1))
+        return seq
+
+    def create_meta_network(self):
+            """
+            Creates a meta network model that takes two inputs and predicts the probability of their relationship.
+
+            Returns:
+                Model: The meta network model.
+            """
+            input_a = Input(shape=(self.INPUT_DIM,))
+            input_b = Input(shape=(self.INPUT_DIM,))
+
+            rel_score = self.base_network(input_a)
+            irr_score = self.base_network(input_b)
+
+            # subtract scores
+            diff = Subtract()([rel_score, irr_score])
+
+            # Pass difference through sigmoid function.
+            prob = Activation("sigmoid")(diff)
+
+            # Build model.
+            model = Model(inputs=[input_a, input_b], outputs=prob)
+            model.compile(optimizer="adam", loss="binary_crossentropy")
+
+            return model
 
     def __init__(self):
         """Initialization of the Heuristic Model.
         """
         self.seed = 123
+        self.INPUT_DIM = 10
+        self.K = 3
         self.models = self.instantiate()
 
     def instantiate(self):
         """Instantiation of the MIP Variables"""
         # To be completed
-        return
+        self.base_network = self.create_base_network()
+        models = []
+        for _ in range(0, self.K):
+            models.append(self.create_meta_network())
+        return models
 
     def fit(self, X, Y):
         """Estimation of the parameters - To be completed.
