@@ -1,7 +1,7 @@
 import os
 import sys
 
-sys.path.append("python/")
+sys.path.append("python_folder/")
 
 import metrics
 import numpy as np
