@@ -200,7 +200,6 @@ class TwoClustersMIP(BaseModel):
         """
 
         self.breakpoints= [(1/(self.L))*i for i in range(self.L+1)]
-       
 
         P = len(X)
         I={}
@@ -277,12 +276,13 @@ from keras import backend
 from keras.layers import Activation, Add, Dense, Input, Lambda, Dropout, Subtract
 from keras.models import Model, Sequential
 from keras.utils import plot_model
+import matplotlib.pyplot as plt
 
 class HeuristicModel(BaseModel):
     """Skeleton of MIP you have to write as the first exercise.
     You have to encapsulate your code within this class that will be called for evaluation.
     """
-    def create_base_network(self):
+    def create_base_network(self) -> Sequential:
         '''Base network to be shared (eq. to feature extraction).
         '''
         seq = Sequential()
@@ -294,7 +294,7 @@ class HeuristicModel(BaseModel):
         seq.add(Dense(1))
         return seq
 
-    def create_meta_network(self):
+    def create_meta_network(self) -> Model:
             """
             Creates a meta network model that takes two inputs and predicts the probability of their relationship.
 
@@ -327,14 +327,26 @@ class HeuristicModel(BaseModel):
         self.K = 3
         self.models = self.instantiate()
 
-    def instantiate(self):
+    def instantiate(self) -> list[Model] :
         """Instantiation of the MIP Variables"""
         # To be completed
         self.base_network = self.create_base_network()
         models = []
-        for _ in range(0, self.K):
+        for _ in range(0, self.K): # Create K models
             models.append(self.create_meta_network())
         return models
+
+    def plot_history(self):
+        """Plot the history of the model training.
+        """
+        for history in self.history:
+            plt.plot(history.history['loss'])
+            plt.plot(history.history['val_loss'])
+            plt.title('model loss')
+            plt.ylabel('loss')
+            plt.xlabel('epoch')
+            plt.legend(['train', 'validation'], loc='upper left')
+            plt.show()
 
     def fit(self, X, Y):
         """Estimation of the parameters - To be completed.
@@ -346,7 +358,25 @@ class HeuristicModel(BaseModel):
         Y: np.ndarray
             (n_samples, n_features) features of unchosen elements
         """
-        # To be completed
+
+        es=keras.callbacks.EarlyStopping(monitor='val_loss',
+                                    min_delta=0,
+                                    patience=2,
+                                    verbose=1, mode='auto')
+
+        NUM_EPOCHS = 100
+        BATCH_SIZE = 10
+        y_compare = np.ones(len(X)) # All X elements are preferred to Y
+        history_list = []
+        for model in self.models:
+            history = model.fit([X, Y], y_compare,
+                                validation_data=([X, Y], y_compare),
+                                epochs=NUM_EPOCHS,
+                                batch_size=BATCH_SIZE,
+                                verbose=1,
+                                callbacks=[es])
+            history_list.append(history)
+        self.history = history_list
         return
 
     def predict_utility(self, X):
@@ -359,4 +389,14 @@ class HeuristicModel(BaseModel):
         """
         # To be completed
         # Do not forget that this method is called in predict_preference (line 42) and therefor should return well-organized data for it to work.
-        return
+
+        predicted_utilities = []
+
+        for model in self.models:
+            predicted_probabilities = model.predict([X, X])
+            predicted_utilities.append(predicted_probabilities)
+
+        # Calculate the average utility over all K models
+        average_utilities = np.mean(predicted_utilities, axis=0)
+
+        return average_utilities
