@@ -2,7 +2,15 @@ import pickle
 from abc import abstractmethod
 from gurobipy import Model, GRB
 
+import keras
+from keras import backend
+from keras.layers import Activation, Add, Dense, Input, Lambda, Dropout, Subtract
+from keras.models import Model, Sequential
+from keras.utils import plot_model
+from sklearn.cluster import KMeans
+import matplotlib.pyplot as plt
 import numpy as np
+import os
 
 
 class BaseModel(object):
@@ -12,6 +20,7 @@ class BaseModel(object):
 
     def __init__(self):
         """Initialization of your model and its hyper-parameters"""
+        model = None
         pass
 
     @abstractmethod
@@ -156,7 +165,9 @@ class RandomExampleModel(BaseModel):
         X: np.ndarray
             (n_samples, n_features) list of features of elements
         """
-        return np.stack([np.dot(X, self.weights[0]), np.dot(X, self.weights[1])], axis=1)
+        return np.stack(
+            [np.dot(X, self.weights[0]), np.dot(X, self.weights[1])], axis=1
+        )
 
 
 class TwoClustersMIP(BaseModel):
@@ -174,17 +185,19 @@ class TwoClustersMIP(BaseModel):
         n°clusters: int
             Number of clusters to implement in the MIP.
         """
-        self.L=n_pieces
-        self.K=n_clusters
+        self.L = n_pieces
+        self.K = n_clusters
         self.seed = 123
         # self.model = self.instantiate()
         self.model = Model("UTA model")
         self.criterions = 4
+        self.breakpoints = []
+        self.breakpoint_utils = {}
 
     def instantiate(self):
         """Instantiation of the MIP Variables - To be completed."""
-        weights_1 = np.full(self.criterions, 1/self.criterions)
-        weights_2 = np.full(self.criterions, 1/self.criterions)
+        weights_1 = np.full(self.criterions, 1 / self.criterions)
+        weights_2 = np.full(self.criterions, 1 / self.criterions)
         self.weights = [weights_1, weights_2]
         return
 
@@ -199,10 +212,10 @@ class TwoClustersMIP(BaseModel):
             (n_samples, n_features) features of unchosen elements
         """
 
-        self.breakpoints= [(1/(self.L))*i for i in range(self.L+1)]
+        self.breakpoints = [(1 / (self.L)) * i for i in range(self.L + 1)]
 
         P = len(X)
-        I={}
+        I = {}
         for p in range(P):
             for k in range(self.K):
                 I[p, k] = self.model.addVar(vtype=GRB.BINARY, name=f"I_{p}_{k}")
@@ -211,21 +224,30 @@ class TwoClustersMIP(BaseModel):
         sigma = {}
         for p in range(P):
             for k in range(self.K):
-                sigma[p, k] = self.model.addVar(lb=0, ub=GRB.INFINITY, vtype=GRB.CONTINUOUS, name=f"sigma_{p}_{k}")
+                sigma[p, k] = self.model.addVar(
+                    lb=0, ub=GRB.INFINITY, vtype=GRB.CONTINUOUS, name=f"sigma_{p}_{k}"
+                )
 
-        somme=0
+        somme = 0
         # Variables for utility at each breakpoint
-        breakpoint_utils={}
+        breakpoint_utils = {}
         for k in range(self.K):
             for i in range(self.criterions):
-                for b in range(self.L+1):
-                    breakpoint_utils[k, i, b] = self.model.addVar(lb=0, ub=GRB.INFINITY, vtype=GRB.CONTINUOUS, name=f"breakpoint_utils_{k}_{i}_{b}")
-        
+                for b in range(self.L + 1):
+                    breakpoint_utils[k, i, b] = self.model.addVar(
+                        lb=0,
+                        ub=GRB.INFINITY,
+                        vtype=GRB.CONTINUOUS,
+                        name=f"breakpoint_utils_{k}_{i}_{b}",
+                    )
+
         # Constraints for linear segments
         for k in range(self.K):
             for i in range(self.criterions):
                 for b in range(self.L):
-                    self.model.addConstr((breakpoint_utils[k, i, b+1] - breakpoint_utils[k, i, b]) >=0)
+                    self.model.addConstr(
+                        (breakpoint_utils[k, i, b + 1] - breakpoint_utils[k, i, b]) >= 0
+                    )
 
         # Function to calculate utility
         def calculate_utility(k, features):
@@ -233,7 +255,10 @@ class TwoClustersMIP(BaseModel):
             for i, feature in enumerate(features):
                 for b in range(self.L):
                     if self.breakpoints[b] <= feature < self.breakpoints[b + 1]:
-                        utility += breakpoint_utils[k, i, b] + ((breakpoint_utils[k, i, b+1]-breakpoint_utils[k, i, b])/(self.breakpoints[b+1]-self.breakpoints[b])) * (feature - self.breakpoints[b])
+                        utility += breakpoint_utils[k, i, b] + (
+                            (breakpoint_utils[k, i, b + 1] - breakpoint_utils[k, i, b])
+                            / (self.breakpoints[b + 1] - self.breakpoints[b])
+                        ) * (feature - self.breakpoints[b])
                         break
             return utility
 
@@ -241,10 +266,17 @@ class TwoClustersMIP(BaseModel):
         for p in range(P):
             self.model.addConstr(sum(I[p, k] for k in range(self.K)) >= 1)
             for k in range(self.K):
-                self.model.addConstr(M * (1 - I[p, k]) + calculate_utility(k, X[p]) - calculate_utility(k, Y[p]) - e +sigma[p,k]>= 0)
+                self.model.addConstr(
+                    M * (1 - I[p, k])
+                    + calculate_utility(k, X[p])
+                    - calculate_utility(k, Y[p])
+                    - e
+                    + sigma[p, k]
+                    >= 0
+                )
         for p in range(P):
             for k in range(self.K):
-                somme+= sigma[p,k]
+                somme += sigma[p, k]
         self.model.setObjective(somme, GRB.MINIMIZE)
         self.breakpoint_utils = breakpoint_utils
         self.model.optimize()
@@ -252,7 +284,9 @@ class TwoClustersMIP(BaseModel):
         return
 
     def predict_utility(self, X):
-        utilities = np.zeros((len(X), self.K))  # Tableau 2D: lignes pour les échantillons, colonnes pour les clusters
+        utilities = np.zeros(
+            (len(X), self.K)
+        )  # Tableau 2D: lignes pour les échantillons, colonnes pour les clusters
         for p in range(len(X)):
             for k in range(self.K):
                 utility = 0
@@ -260,124 +294,138 @@ class TwoClustersMIP(BaseModel):
                     for b in range(self.L):
                         if self.breakpoints[b] <= feature < self.breakpoints[b + 1]:
                             # Calculer l'utilité pour chaque cluster séparément
-                            utility += self.breakpoint_utils[k, i, b].X + ((self.breakpoint_utils[k, i, b+1].X - self.breakpoint_utils[k, i, b].X) / (self.breakpoints[b+1] - self.breakpoints[b])) * (feature - self.breakpoints[b])
+                            utility += self.breakpoint_utils[k, i, b].X + (
+                                (
+                                    self.breakpoint_utils[k, i, b + 1].X
+                                    - self.breakpoint_utils[k, i, b].X
+                                )
+                                / (self.breakpoints[b + 1] - self.breakpoints[b])
+                            ) * (feature - self.breakpoints[b])
                             break
-                utilities[p, k] = utility  # Stocker l'utilité de l'échantillon 'p' pour le cluster 'k'
+                utilities[p, k] = (
+                    utility  # Stocker l'utilité de l'échantillon 'p' pour le cluster 'k'
+                )
         return utilities
-
-
-
 
         # To be completed
         # Do not forget that this method is called in predict_preference (line 42) and therefor should return well-organized data for it to work.
 
-import keras
-from keras import backend
-from keras.layers import Activation, Add, Dense, Input, Lambda, Dropout, Subtract
-from keras.models import Model, Sequential
-from keras.utils import plot_model
-import matplotlib.pyplot as plt
 
 class HeuristicModel(BaseModel):
     """Skeleton of MIP you have to write as the first exercise.
     You have to encapsulate your code within this class that will be called for evaluation.
     """
-    def create_base_network(self) -> Sequential:
-        '''Base network to be shared (eq. to feature extraction).
-        '''
-        seq = Sequential()
-        seq.add(Dense(self.INPUT_DIM, input_shape=(self.INPUT_DIM,), activation='relu'))
-        seq.add(Dropout(0.1))
-        seq.add(Dense(64, activation='relu'))
-        seq.add(Dropout(0.1))
-        seq.add(Dense(32, activation='relu'))
-        seq.add(Dense(1))
-        return seq
 
     def create_meta_network(self) -> Model:
-            """
-            Creates a meta network model that takes two inputs and predicts the probability of their relationship.
+        """
+        Creates a meta network model that takes two inputs and predicts the probability of their relationship.
 
-            Returns:
-                Model: The meta network model.
-            """
-            input_a = Input(shape=(self.INPUT_DIM,))
-            input_b = Input(shape=(self.INPUT_DIM,))
+        Returns:
+            Model: The meta network model.
+        """
+        # Create a new base network instance for each meta model
+        seq = Sequential()
+        seq.add(Dense(self.INPUT_DIM, input_shape=(self.INPUT_DIM,), activation="relu"))
+        seq.add(Dropout(0.1))
+        seq.add(Dense(64, activation="relu"))
+        seq.add(Dropout(0.1))
+        seq.add(Dense(32, activation="relu"))
+        seq.add(Dense(1))
 
-            rel_score = self.base_network(input_a)
-            irr_score = self.base_network(input_b)
+        input_a = Input(shape=(self.INPUT_DIM,))
+        input_b = Input(shape=(self.INPUT_DIM,))
 
-            # subtract scores
-            diff = Subtract()([rel_score, irr_score])
+        rel_score = seq(input_a)
+        irr_score = seq(input_b)
 
-            # Pass difference through sigmoid function.
-            prob = Activation("sigmoid")(diff)
+        # subtract scores
+        diff = Subtract()([rel_score, irr_score])
 
-            # Build model.
-            model = Model(inputs=[input_a, input_b], outputs=prob)
-            model.compile(optimizer="adam", loss="binary_crossentropy")
+        # Pass difference through sigmoid function.
+        prob = Activation("sigmoid")(diff)
 
-            return model
+        # Build model.
+        model = Model(inputs=[input_a, input_b], outputs=prob)
+        model.compile(optimizer="adam", loss="binary_crossentropy")
+
+        return model
 
     def __init__(self):
-        """Initialization of the Heuristic Model.
-        """
+        """Initialization of the Heuristic Model."""
         self.seed = 123
         self.INPUT_DIM = 10
         self.K = 3
+        self.history = []
         self.models = self.instantiate()
 
-    def instantiate(self) -> list[Model] :
+    def instantiate(self) -> list[Model]:
         """Instantiation of the MIP Variables"""
-        # To be completed
-        self.base_network = self.create_base_network()
+        # Initialize the clustering model
+        self.kmeans = KMeans(n_clusters=self.K, random_state=self.seed)
+
+        # Initialize the siamese networks
         models = []
-        for _ in range(0, self.K): # Create K models
+        for _ in range(0, self.K):  # Create K models
             models.append(self.create_meta_network())
         return models
 
-    def plot_history(self):
-        """Plot the history of the model training.
-        """
-        for history in self.history:
-            plt.plot(history.history['loss'])
-            plt.plot(history.history['val_loss'])
-            plt.title('model loss')
-            plt.ylabel('loss')
-            plt.xlabel('epoch')
-            plt.legend(['train', 'validation'], loc='upper left')
-            plt.show()
-
     def fit(self, X, Y):
-        """Estimation of the parameters - To be completed.
+        """Estimation of the parameters for each cluster model.
 
         Parameters
         ----------
         X: np.ndarray
-            (n_samples, n_features) features of elements preferred to Y elements
+            (n_samples, n_features) features of elements preferred to Y elements.
         Y: np.ndarray
-            (n_samples, n_features) features of unchosen elements
+            (n_samples, n_features) features of unchosen elements.
         """
+        # Différence X - Y pour déterminer le clustering
+        diff = X - Y
+        self.kmeans.fit(diff)
 
-        es=keras.callbacks.EarlyStopping(monitor='val_loss',
-                                    min_delta=0,
-                                    patience=2,
-                                    verbose=1, mode='auto')
+        # Sépare les données en fonction des étiquettes de cluster
+        cluster_labels = self.kmeans.labels_
 
-        NUM_EPOCHS = 100
-        BATCH_SIZE = 10
-        y_compare = np.ones(len(X)) # All X elements are preferred to Y
-        history_list = []
-        for model in self.models:
-            history = model.fit([X, Y], y_compare,
-                                validation_data=([X, Y], y_compare),
-                                epochs=NUM_EPOCHS,
-                                batch_size=BATCH_SIZE,
-                                verbose=1,
-                                callbacks=[es])
-            history_list.append(history)
-        self.history = history_list
-        return
+        for k in range(self.K):
+            # Filtre les données pour le cluster k
+            cluster_indices = np.where(cluster_labels == k)[0]
+            X_k = X[cluster_indices]
+            Y_k = Y[cluster_indices]
+
+            if len(X_k) == 0:  # Vérifie s'il y a des données pour le cluster
+                continue  # Passe au cluster suivant s'il n'y a pas de données
+
+            # Configure EarlyStopping
+            es = keras.callbacks.EarlyStopping(
+                monitor="val_loss", min_delta=0, patience=5, verbose=1, mode="auto"
+            )
+
+            # Prépare les labels pour l'entraînement: tous les X sont préférés à Y
+            y_compare = np.ones(len(X_k))
+
+            # Entraîne le modèle pour le cluster k
+            history = self.models[k].fit(
+                [X_k, Y_k],
+                y_compare,
+                validation_split=0.2,  # Utilise une fraction des données pour la validation
+                epochs=50,
+                batch_size=10,
+                verbose=1,
+                callbacks=[es],
+            )
+
+            self.history.append(history)
+
+    def plot_history(self):
+        """Plot the history of the model training."""
+        for history in self.history:
+            plt.plot(history.history["loss"])
+            plt.plot(history.history["val_loss"])
+            plt.title("model loss")
+            plt.ylabel("loss")
+            plt.xlabel("epoch")
+            plt.legend(["train", "validation"], loc="upper left")
+            plt.show()
 
     def predict_utility(self, X):
         """Return Decision Function of the MIP for X. - To be completed.
@@ -390,13 +438,96 @@ class HeuristicModel(BaseModel):
         # To be completed
         # Do not forget that this method is called in predict_preference (line 42) and therefor should return well-organized data for it to work.
 
-        predicted_utilities = []
-
+        # Create a dummy Y to predict the utility (because needs 2 inputs)
+        dummy_Y = np.zeros_like(X)
+        # Predict the utility (preference score) for X using each model
+        utility_scores = []
         for model in self.models:
-            predicted_probabilities = model.predict([X, X])
-            predicted_utilities.append(predicted_probabilities)
+            # The model expects two inputs; X and a dummy Y
+            scores = model.predict([X, dummy_Y])
+            utility_scores.append(scores)
 
-        # Calculate the average utility over all K models
-        average_utilities = np.mean(predicted_utilities, axis=0)
+        # # Convert list of scores to a numpy array for easy manipulation
+        # utility_scores = np.array(utility_scores).squeeze(
+        #     axis=0
+        # )  # Adjust dimensions if necessary
 
-        return average_utilities
+        # return utility_scores
+        # Best utility score
+        best_utility = np.argmax(utility_scores, axis=0)
+        return best_utility
+
+    def predict_preference(self, X, Y) -> np.ndarray:
+        """Method to predict which pair is preferred between X[i] and Y[i] for all i.
+        Returns a preference for each cluster.
+
+        Parameters
+        -----------
+        X: np.ndarray
+            (n_samples, n_features) list of features of elements to compare with Y elements of same index
+        Y: np.ndarray
+            (n_samples, n_features) list of features of elements to compare with X elements of same index
+
+        Returns
+        -------
+        np.ndarray:
+            (n_samples, n_clusters) array of preferences for each cluster. 1 if X is preferred to Y, 0 otherwise
+        """
+        utilities = []
+        for model in self.models:
+            utilities.append(model.predict([X, Y]))
+
+        return np.array(utilities)
+
+        # # get the best preference
+        # best_preference = np.argmax(utilities, axis=0)
+        # return best_preference
+        # # return np.array(utilities)
+
+    def test_model(self, X, Y, Z):
+        """Compare the preferences between X and Y
+        Find the cluster that explain the best the preferences and compare the preferences with Z
+
+        Args:
+            X (np.ndarray): (n_samples, n_features) list of features of elements to compare with Y elements of same index
+            Y (np.ndarray): (n_samples, n_features) list of features of elements to compare with X elements of same index
+            Z (np.ndarray): (n_samples) list of preferences for each pair of elements
+        """
+        # Predict the preferences for each cluster
+        preferences = self.predict_preference(X, Y)
+        # Find the cluster with the highest utility
+        best_cluster = np.argmax(preferences, axis=1)
+        # Compare the preferences with Z
+        accuracy = np.mean(best_cluster == Z)
+        return accuracy
+
+    def save_model_weights(self, directory_path):
+        """Sauvegarde les poids des modèles dans le répertoire spécifié.
+
+        Parameters:
+        -----------
+        directory_path: str
+            Le chemin du répertoire où sauvegarder les poids des modèles.
+        """
+        if not os.path.exists(directory_path):
+            os.makedirs(directory_path)
+        for idx, model in enumerate(self.models):
+            model_path = os.path.join(directory_path, f"model_{idx}.h5")
+            model.save_weights(model_path)
+        print(f"Modèles sauvegardés dans {directory_path}")
+
+    def load_model_weights(self, directory_path):
+        """Charge les poids des modèles depuis le répertoire spécifié.
+
+        Parameters:
+        -----------
+        directory_path: str
+            Le chemin du répertoire d'où charger les poids des modèles.
+        """
+        for idx, model in enumerate(self.models):
+            model_path = os.path.join(directory_path, f"model_{idx}.h5")
+            if os.path.exists(model_path):
+                model.load_weights(model_path)
+                print(f"Poids chargés depuis {model_path}")
+            else:
+                print(f"Le fichier {model_path} n'existe pas, chargement impossible.")
