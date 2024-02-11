@@ -1,6 +1,6 @@
 import pickle
 from abc import abstractmethod
-from gurobipy import Model, GRB
+from gurobipy import Model as ModelGurobi, GRB
 
 import keras
 from keras import backend
@@ -188,15 +188,15 @@ class TwoClustersMIP(BaseModel):
         self.L = n_pieces
         self.K = n_clusters
         self.seed = 123
-        # self.model = self.instantiate()
-        self.model = Model("UTA model")
+        self.model = self.instantiate()
+        # self.model = Model("UTA model")
         self.criterions = 4
         self.breakpoints = []
         self.breakpoint_utils = {}
 
     def instantiate(self):
         """Instantiation of the MIP Variables - To be completed."""
-        return
+        return ModelGurobi("UTA model")
 
     def fit(self, X, Y):
         """Estimation of the parameters - To be completed.
@@ -675,8 +675,6 @@ class HeuristicModelSiameseNetwork2(BaseModel):
 # (et c'est le cas car nos données sont préférentielles)
 
 
-
-
 class HeuristicModelUTA(BaseModel):
     """Skeleton of MIP you have to write as the first exercise.
     You have to encapsulate your code within this class that will be called for evaluation.
@@ -696,18 +694,34 @@ class HeuristicModelUTA(BaseModel):
         self.K = n_clusters
         self.seed = 123
         # self.model = self.instantiate()
-        self.model = Model("UTA model")
-        self.criterions = 4
+        self.model = ModelGurobi("UTA model")
+        self.criterions = 10
         self.breakpoints = []
         self.breakpoint_utils = {}
-    
+
     def kmeans_init(self, X, Y):
-        return KMeans(n_clusters=self.K, random_state=1).fit_predict(X-Y)
-    
+        return KMeans(n_clusters=self.K, random_state=1).fit_predict(X - Y)
 
     def instantiate(self):
         """Instantiation of the MIP Variables - To be completed."""
         return
+
+    def calculate_utility(self, k, features, breakpoint_utils, breakpoints, L):
+        utility = 0
+        for i, feature in enumerate(features):
+            try:
+                for b in range(L):
+                    if breakpoints[b] <= feature < breakpoints[b + 1]:
+                        utility += breakpoint_utils[k, i, b] + (
+                            (breakpoint_utils[k, i, b + 1] - breakpoint_utils[k, i, b])
+                            / (breakpoints[b + 1] - breakpoints[b])
+                        ) * (feature - breakpoints[b])
+                        break
+            except KeyError as e:
+                print(f"KeyError for k={k}, i={i}, b={b}, feature={feature}")
+                print(f"Available keys: {breakpoint_utils.keys()}")
+                raise e
+        return utility
 
     def fit(self, X, Y):
         """Estimation of the parameters - To be completed.
@@ -721,7 +735,7 @@ class HeuristicModelUTA(BaseModel):
         """
 
         self.breakpoints = [(1 / (self.L)) * i for i in range(self.L + 1)]
-        clusters= self.kmeans_init(X,Y)
+        clusters = self.kmeans_init(X, Y)
         P = len(X)
         # I = {}
         # for p in range(P):
@@ -731,9 +745,10 @@ class HeuristicModelUTA(BaseModel):
         e = 10**-3
         sigma = {}
         for p in range(P):
-            sigma[p, clusters[p]] = self.model.addVar(
-                lb=0, ub=GRB.INFINITY, vtype=GRB.CONTINUOUS, name=f"sigma_{p}_{k}"
-            )
+            for k in range(self.K):
+                sigma[p, clusters[p]] = self.model.addVar(
+                    lb=0, ub=GRB.INFINITY, vtype=GRB.CONTINUOUS, name=f"sigma_{p}_{k}"
+                )
 
         somme = 0
         # Variables for utility at each breakpoint
@@ -769,13 +784,28 @@ class HeuristicModelUTA(BaseModel):
                         break
             return utility
 
+        # Debugging
+        print(f"Number of features provided: {X.shape[1]}")
+        print(f"Number of criterions expected: {self.criterions}")
+
         # Utility difference constraint
         for p in range(P):
+            if len(X[p]) > self.criterions:
+                raise ValueError(
+                    f"Too many features: {len(X[p])} provided for {self.criterions} criterions."
+                )
             self.model.addConstr(
-                + calculate_utility(clusters[p], X[p])
-                - calculate_utility(clusters[p], Y[p])
+                self.calculate_utility(
+                    clusters[p], X[p], breakpoint_utils, self.breakpoints, self.L
+                )
+                - self.calculate_utility(
+                    clusters[p], Y[p], breakpoint_utils, self.breakpoints, self.L
+                )
+                # calculate_utility(clusters[p], X[p])
+                # - calculate_utility(clusters[p], Y[p])
                 - e
-                + sigma[p, k]
+                # + sigma[p, k]
+                + sigma[p, clusters[p]]
                 >= 0
             )
         for p in range(P):
