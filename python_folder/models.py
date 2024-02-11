@@ -196,9 +196,6 @@ class TwoClustersMIP(BaseModel):
 
     def instantiate(self):
         """Instantiation of the MIP Variables - To be completed."""
-        weights_1 = np.full(self.criterions, 1 / self.criterions)
-        weights_2 = np.full(self.criterions, 1 / self.criterions)
-        self.weights = [weights_1, weights_2]
         return
 
     def fit(self, X, Y):
@@ -676,3 +673,142 @@ class HeuristicModelSiameseNetwork2(BaseModel):
 
 # x - y marche si on a des utilité linaires et marche encore mieux du fait que les données sont monotonnes
 # (et c'est le cas car nos données sont préférentielles)
+
+
+
+
+class HeuristicModelUTA(BaseModel):
+    """Skeleton of MIP you have to write as the first exercise.
+    You have to encapsulate your code within this class that will be called for evaluation.
+    """
+
+    def __init__(self, n_pieces, n_clusters):
+        """Initialization of the MIP Variables
+
+        Parameters
+        ----------
+        n_pieces: int
+            Number of pieces for the utility function of each feature.
+        n°clusters: int
+            Number of clusters to implement in the MIP.
+        """
+        self.L = n_pieces
+        self.K = n_clusters
+        self.seed = 123
+        # self.model = self.instantiate()
+        self.model = Model("UTA model")
+        self.criterions = 4
+        self.breakpoints = []
+        self.breakpoint_utils = {}
+    
+    def kmeans_init(self, X, Y):
+        return KMeans(n_clusters=self.K, random_state=1).fit_predict(X-Y)
+    
+
+    def instantiate(self):
+        """Instantiation of the MIP Variables - To be completed."""
+        return
+
+    def fit(self, X, Y):
+        """Estimation of the parameters - To be completed.
+
+        Parameters
+        ----------
+        X: np.ndarray
+            (n_samples, n_features) features of elements preferred to Y elements
+        Y: np.ndarray
+            (n_samples, n_features) features of unchosen elements
+        """
+
+        self.breakpoints = [(1 / (self.L)) * i for i in range(self.L + 1)]
+        clusters= self.kmeans_init(X,Y)
+        P = len(X)
+        # I = {}
+        # for p in range(P):
+        #     for k in range(self.K):
+        #         I[p, k] = self.model.addVar(vtype=GRB.BINARY, name=f"I_{p}_{k}")
+        M = 10
+        e = 10**-3
+        sigma = {}
+        for p in range(P):
+            sigma[p, clusters[p]] = self.model.addVar(
+                lb=0, ub=GRB.INFINITY, vtype=GRB.CONTINUOUS, name=f"sigma_{p}_{k}"
+            )
+
+        somme = 0
+        # Variables for utility at each breakpoint
+        breakpoint_utils = {}
+        for k in range(self.K):
+            for i in range(self.criterions):
+                for b in range(self.L + 1):
+                    breakpoint_utils[k, i, b] = self.model.addVar(
+                        lb=0,
+                        ub=GRB.INFINITY,
+                        vtype=GRB.CONTINUOUS,
+                        name=f"breakpoint_utils_{k}_{i}_{b}",
+                    )
+
+        # Constraints for linear segments
+        for k in range(self.K):
+            for i in range(self.criterions):
+                for b in range(self.L):
+                    self.model.addConstr(
+                        (breakpoint_utils[k, i, b + 1] - breakpoint_utils[k, i, b]) >= 0
+                    )
+
+        # Function to calculate utility
+        def calculate_utility(k, features):
+            utility = 0
+            for i, feature in enumerate(features):
+                for b in range(self.L):
+                    if self.breakpoints[b] <= feature < self.breakpoints[b + 1]:
+                        utility += breakpoint_utils[k, i, b] + (
+                            (breakpoint_utils[k, i, b + 1] - breakpoint_utils[k, i, b])
+                            / (self.breakpoints[b + 1] - self.breakpoints[b])
+                        ) * (feature - self.breakpoints[b])
+                        break
+            return utility
+
+        # Utility difference constraint
+        for p in range(P):
+            self.model.addConstr(
+                + calculate_utility(clusters[p], X[p])
+                - calculate_utility(clusters[p], Y[p])
+                - e
+                + sigma[p, k]
+                >= 0
+            )
+        for p in range(P):
+            somme += sigma[p, clusters[p]]
+        self.model.setObjective(somme, GRB.MINIMIZE)
+        self.breakpoint_utils = breakpoint_utils
+        self.model.optimize()
+
+        return
+
+    def predict_utility(self, X):
+        utilities = np.zeros(
+            (len(X), self.K)
+        )  # Tableau 2D: lignes pour les échantillons, colonnes pour les clusters
+        for p in range(len(X)):
+            for k in range(self.K):
+                utility = 0
+                for i, feature in enumerate(X[p]):
+                    for b in range(self.L):
+                        if self.breakpoints[b] <= feature < self.breakpoints[b + 1]:
+                            # Calculer l'utilité pour chaque cluster séparément
+                            utility += self.breakpoint_utils[k, i, b].X + (
+                                (
+                                    self.breakpoint_utils[k, i, b + 1].X
+                                    - self.breakpoint_utils[k, i, b].X
+                                )
+                                / (self.breakpoints[b + 1] - self.breakpoints[b])
+                            ) * (feature - self.breakpoints[b])
+                            break
+                utilities[p, k] = (
+                    utility  # Stocker l'utilité de l'échantillon 'p' pour le cluster 'k'
+                )
+        return utilities
+
+        # To be completed
+        # Do not forget that this method is called in predict_preference (line 42) and therefor should return well-organized data for it to work.
