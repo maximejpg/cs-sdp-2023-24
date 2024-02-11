@@ -311,7 +311,7 @@ class TwoClustersMIP(BaseModel):
         # Do not forget that this method is called in predict_preference (line 42) and therefor should return well-organized data for it to work.
 
 
-class HeuristicModel(BaseModel):
+class HeuristicModelSiameseNetwork(BaseModel):
     """Skeleton of MIP you have to write as the first exercise.
     You have to encapsulate your code within this class that will be called for evaluation.
     """
@@ -330,7 +330,134 @@ class HeuristicModel(BaseModel):
         seq.add(Dense(64, activation="relu"))
         seq.add(Dropout(0.1))
         seq.add(Dense(32, activation="relu"))
-        seq.add(Dense(1, activation="sigmoid"))  # Apply sigmoid activation function
+        seq.add(
+            Dense(1, activation="sigmoid")
+        )  # Apply sigmoid activation function to get output between 0 and 1
+
+        input_a = Input(shape=(self.INPUT_DIM,))
+        input_b = Input(shape=(self.INPUT_DIM,))
+
+        rel_score = seq(input_a)
+        irr_score = seq(input_b)
+
+        # subtract scores
+        diff = Subtract()([rel_score, irr_score])
+
+        # Pass difference through sigmoid function.
+        prob = Activation("sigmoid")(diff)
+
+        # Build model.
+        model = Model(inputs=[input_a, input_b], outputs=prob)
+        model.compile(optimizer="adam", loss="binary_crossentropy")
+
+        return model
+
+    def __init__(self):
+        """Initialization of the Heuristic Model."""
+        self.seed = 123
+        self.INPUT_DIM = 10
+        self.K = 3
+        self.history = []
+        self.model = self.instantiate()
+
+    def instantiate(self) -> Model:
+        """Instantiation of the MIP Variables"""
+        return self.create_meta_network()
+
+    def fit(self, X, Y):
+        """Estimation of the parameters of the model.
+
+        Parameters
+        ----------
+        X: np.ndarray
+            (n_samples, n_features) features of elements preferred to Y elements.
+        Y: np.ndarray
+            (n_samples, n_features) features of unchosen elements.
+        """
+        # Configure EarlyStopping
+        es = keras.callbacks.EarlyStopping(
+            monitor="val_loss", min_delta=0, patience=5, verbose=1, mode="auto"
+        )
+
+        # Prépare les labels pour l'entraînement: tous les X sont préférés à Y
+        y_compare = np.ones(len(X))
+
+        # Entraîne le modèle pour le cluster k
+        self.history = self.model.fit(
+            [X, Y],
+            y_compare,
+            validation_split=0.2,  # Utilise une fraction des données pour la validation
+            epochs=50,
+            batch_size=10,
+            verbose=1,
+            callbacks=[es],
+        )
+
+    def plot_history(self):
+        """Plot the history of the model training."""
+        plt.plot(self.history.history["loss"])
+        plt.plot(self.history.history["val_loss"])
+        plt.title("model loss")
+        plt.ylabel("loss")
+        plt.xlabel("epoch")
+        plt.legend(["train", "validation"], loc="upper left")
+        plt.show()
+
+    def predict_utility(self, X):
+        """Return Decision Function of the MIP for X. - To be completed.
+
+        Parameters:
+        -----------
+        X: np.ndarray
+            (n_samples, n_features) list of features of elements
+        """
+        # Create a dummy Y to predict the utility (because needs 2 inputs)
+        dummy_Y = np.zeros_like(X)
+        predicted_utility = self.model.predict([X, dummy_Y])
+        return predicted_utility
+
+    def predict_preference(self, X, Y) -> np.ndarray:
+        """Method to predict which pair is preferred between X[i] and Y[i] for all i.
+        Returns a preference for each cluster.
+
+        Parameters
+        -----------
+        X: np.ndarray
+            (n_samples, n_features) list of features of elements to compare with Y elements of same index
+        Y: np.ndarray
+            (n_samples, n_features) list of features of elements to compare with X elements of same index
+
+        Returns
+        -------
+        np.ndarray:
+            (n_samples, n_clusters) array of preferences for each cluster. 1 if X is preferred to Y, 0 otherwise
+        """
+        utilities = self.model.predict([X, Y])
+        return np.array(utilities)
+
+
+class HeuristicModelSiameseNetwork2(BaseModel):
+    """Skeleton of MIP you have to write as the first exercise.
+    You have to encapsulate your code within this class that will be called for evaluation.
+    """
+
+    def create_meta_network(self) -> Model:
+        """
+        Creates a meta network model that takes two inputs and predicts the probability of their relationship.
+
+        Returns:
+            Model: The meta network model.
+        """
+        # Create a new base network instance for each meta model
+        seq = Sequential()
+        seq.add(Dense(self.INPUT_DIM, input_shape=(self.INPUT_DIM,), activation="relu"))
+        seq.add(Dropout(0.1))
+        seq.add(Dense(64, activation="relu"))
+        seq.add(Dropout(0.1))
+        seq.add(Dense(32, activation="relu"))
+        seq.add(
+            Dense(1, activation="sigmoid")
+        )  # Apply sigmoid activation function to get output between 0 and 1
 
         input_a = Input(shape=(self.INPUT_DIM,))
         input_b = Input(shape=(self.INPUT_DIM,))
@@ -446,13 +573,6 @@ class HeuristicModel(BaseModel):
             # The model expects two inputs; X and a dummy Y
             scores = model.predict([X, dummy_Y])
             utility_scores.append(scores)
-
-        # # Convert list of scores to a numpy array for easy manipulation
-        # utility_scores = np.array(utility_scores).squeeze(
-        #     axis=0
-        # )  # Adjust dimensions if necessary
-
-        # return utility_scores
 
         # Correctly convert list of scores to a numpy array for easy manipulation
         utility_scores = np.array(utility_scores)
