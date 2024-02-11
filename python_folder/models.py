@@ -308,132 +308,7 @@ class TwoClustersMIP(BaseModel):
         # Do not forget that this method is called in predict_preference (line 42) and therefor should return well-organized data for it to work.
 
 
-class HeuristicModelSiameseNetwork(BaseModel):
-    """Skeleton of MIP you have to write as the first exercise.
-    You have to encapsulate your code within this class that will be called for evaluation.
-    """
-
-    def create_meta_network(self) -> Model:
-        """
-        Creates a meta network model that takes two inputs and predicts the probability of their relationship.
-
-        Returns:
-            Model: The meta network model.
-        """
-        # Create a new base network instance for each meta model
-        seq = Sequential()
-        seq.add(Dense(self.INPUT_DIM, input_shape=(self.INPUT_DIM,), activation="relu"))
-        seq.add(Dropout(0.1))
-        seq.add(Dense(64, activation="relu"))
-        seq.add(Dropout(0.1))
-        seq.add(Dense(32, activation="relu"))
-        seq.add(
-            Dense(1, activation="sigmoid")
-        )  # Apply sigmoid activation function to get output between 0 and 1
-
-        input_a = Input(shape=(self.INPUT_DIM,))
-        input_b = Input(shape=(self.INPUT_DIM,))
-
-        rel_score = seq(input_a)
-        irr_score = seq(input_b)
-
-        # subtract scores
-        diff = Subtract()([rel_score, irr_score])
-
-        # Pass difference through sigmoid function.
-        prob = Activation("sigmoid")(diff)
-
-        # Build model.
-        model = Model(inputs=[input_a, input_b], outputs=prob)
-        model.compile(optimizer="adam", loss="binary_crossentropy")
-
-        return model
-
-    def __init__(self):
-        """Initialization of the Heuristic Model."""
-        self.seed = 123
-        self.INPUT_DIM = 10
-        self.K = 3
-        self.history = []
-        self.model = self.instantiate()
-
-    def instantiate(self) -> Model:
-        """Instantiation of the MIP Variables"""
-        return self.create_meta_network()
-
-    def fit(self, X, Y):
-        """Estimation of the parameters of the model.
-
-        Parameters
-        ----------
-        X: np.ndarray
-            (n_samples, n_features) features of elements preferred to Y elements.
-        Y: np.ndarray
-            (n_samples, n_features) features of unchosen elements.
-        """
-        # Configure EarlyStopping
-        es = keras.callbacks.EarlyStopping(
-            monitor="val_loss", min_delta=0, patience=5, verbose=1, mode="auto"
-        )
-
-        # Prépare les labels pour l'entraînement: tous les X sont préférés à Y
-        y_compare = np.ones(len(X))
-
-        # Entraîne le modèle pour le cluster k
-        self.history = self.model.fit(
-            [X, Y],
-            y_compare,
-            validation_split=0.2,  # Utilise une fraction des données pour la validation
-            epochs=50,
-            batch_size=10,
-            verbose=1,
-            callbacks=[es],
-        )
-
-    def plot_history(self):
-        """Plot the history of the model training."""
-        plt.plot(self.history.history["loss"])
-        plt.plot(self.history.history["val_loss"])
-        plt.title("model loss")
-        plt.ylabel("loss")
-        plt.xlabel("epoch")
-        plt.legend(["train", "validation"], loc="upper left")
-        plt.show()
-
-    def predict_utility(self, X):
-        """Return Decision Function of the MIP for X. - To be completed.
-
-        Parameters:
-        -----------
-        X: np.ndarray
-            (n_samples, n_features) list of features of elements
-        """
-        # Create a dummy Y to predict the utility (because needs 2 inputs)
-        dummy_Y = np.zeros_like(X)
-        predicted_utility = self.model.predict([X, dummy_Y])
-        return predicted_utility
-
-    def predict_preference(self, X, Y) -> np.ndarray:
-        """Method to predict which pair is preferred between X[i] and Y[i] for all i.
-        Returns a preference for each cluster.
-
-        Parameters
-        -----------
-        X: np.ndarray
-            (n_samples, n_features) list of features of elements to compare with Y elements of same index
-        Y: np.ndarray
-            (n_samples, n_features) list of features of elements to compare with X elements of same index
-
-        Returns
-        -------
-        np.ndarray:
-            (n_samples, n_clusters) array of preferences for each cluster. 1 if X is preferred to Y, 0 otherwise
-        """
-        utilities = self.model.predict([X, Y])
-        return np.array(utilities)
-
-
-class HeuristicModelSiameseNetwork2(BaseModel):
+class HeuristicModelSiameseNetwork3(BaseModel):
     """Skeleton of MIP you have to write as the first exercise.
     You have to encapsulate your code within this class that will be called for evaluation.
     """
@@ -565,35 +440,20 @@ class HeuristicModelSiameseNetwork2(BaseModel):
         # Create a dummy Y to predict the utility (because needs 2 inputs)
         dummy_Y = np.zeros_like(X)
         # Predict the utility (preference score) for X using each model
-        utility_scores = []
+        scores = []
         for model in self.models:
             # The model expects two inputs; X and a dummy Y
-            scores = model.predict([X, dummy_Y])
-            utility_scores.append(scores)
+            # Assume each model.predict returns a 2D array of shape (n_samples, 1)
+            # We squeeze the result to ensure it's a 1D array
+            scores.append(model.predict([X, dummy_Y]).squeeze())
 
-        # Correctly convert list of scores to a numpy array for easy manipulation
-        utility_scores = np.array(utility_scores)
+        # Convert the list of scores to a numpy array for easy manipulation
+        # The result is a 2D array where each row corresponds to an X and each column to a model's score
+        utility_scores = np.array(
+            scores
+        ).T  # Transpose to get models as columns and samples as rows
 
-        # After conversion, we can now check the shape and dimensions
-        # Ensure the shape of utility_scores is correct for applying np.argmax
-        if utility_scores.ndim == 2 and utility_scores.shape[0] != len(X):
-            utility_scores = utility_scores.transpose()
-
-        # Find the index of the best utility score for each sample
-        best_indices = np.argmax(utility_scores, axis=0)
-
-        # Since utility_scores might have models as rows and samples as columns, we use best_indices to select best scores
-        # Ensure to select best scores correctly based on the shape of utility_scores
-        if utility_scores.shape[0] == len(X):
-            # If utility_scores is shaped (samples, models), use best_indices directly
-            best_utility = np.array(
-                [utility_scores[i, best_indices[i]] for i in range(len(best_indices))]
-            )
-        else:
-            # If utility_scores is shaped differently, adjust selection logic accordingly
-            best_utility = utility_scores[best_indices, np.arange(len(best_indices))]
-
-        return best_utility
+        return utility_scores
 
     def predict_preference(self, X, Y) -> np.ndarray:
         """Method to predict which pair is preferred between X[i] and Y[i] for all i.
@@ -611,16 +471,14 @@ class HeuristicModelSiameseNetwork2(BaseModel):
         np.ndarray:
             (n_samples, n_clusters) array of preferences for each cluster. 1 if X is preferred to Y, 0 otherwise
         """
-        utilities = []
-        for model in self.models:
-            utilities.append(model.predict([X, Y]))
+        # Obtenir les scores d'utilité pour X et Y
+        utility_scores_X = self.predict_utility(X)
+        utility_scores_Y = self.predict_utility(Y)
 
-        return np.array(utilities)
+        # Calculer la préférence : 1 si le score d'utilité de X est supérieur à celui de Y, 0 sinon
+        preferences = (utility_scores_X > utility_scores_Y).astype(int)
 
-        # # get the best preference
-        # best_preference = np.argmax(utilities, axis=0)
-        # return best_preference
-        # # return np.array(utilities)
+        return preferences
 
     def test_model(self, X, Y, Z):
         """Compare the preferences between X and Y
