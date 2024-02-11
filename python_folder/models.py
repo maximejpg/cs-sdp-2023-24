@@ -327,7 +327,7 @@ class HeuristicModel(BaseModel):
         seq.add(Dense(64, activation="relu"))
         seq.add(Dropout(0.1))
         seq.add(Dense(32, activation="relu"))
-        seq.add(Dense(1))
+        seq.add(Dense(1, activation="sigmoid"))  # Apply sigmoid activation function
 
         input_a = Input(shape=(self.INPUT_DIM,))
         input_b = Input(shape=(self.INPUT_DIM,))
@@ -450,8 +450,29 @@ class HeuristicModel(BaseModel):
         # )  # Adjust dimensions if necessary
 
         # return utility_scores
-        # Best utility score
-        best_utility = np.argmax(utility_scores, axis=0)
+
+        # Correctly convert list of scores to a numpy array for easy manipulation
+        utility_scores = np.array(utility_scores)
+
+        # After conversion, we can now check the shape and dimensions
+        # Ensure the shape of utility_scores is correct for applying np.argmax
+        if utility_scores.ndim == 2 and utility_scores.shape[0] != len(X):
+            utility_scores = utility_scores.transpose()
+
+        # Find the index of the best utility score for each sample
+        best_indices = np.argmax(utility_scores, axis=0)
+
+        # Since utility_scores might have models as rows and samples as columns, we use best_indices to select best scores
+        # Ensure to select best scores correctly based on the shape of utility_scores
+        if utility_scores.shape[0] == len(X):
+            # If utility_scores is shaped (samples, models), use best_indices directly
+            best_utility = np.array(
+                [utility_scores[i, best_indices[i]] for i in range(len(best_indices))]
+            )
+        else:
+            # If utility_scores is shaped differently, adjust selection logic accordingly
+            best_utility = utility_scores[best_indices, np.arange(len(best_indices))]
+
         return best_utility
 
     def predict_preference(self, X, Y) -> np.ndarray:
@@ -528,6 +549,12 @@ class HeuristicModel(BaseModel):
                 print(f"Poids chargés depuis {model_path}")
             else:
                 print(f"Le fichier {model_path} n'existe pas, chargement impossible.")
+
+
+# x - y marche si on a des utilité linaires et marche encore mieux du fait que les données sont monotonnes
+# (et c'est le cas car nos données sont préférentielles)
+
+
 
 
 class HeuristicModelUTA(BaseModel):
