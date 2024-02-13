@@ -330,6 +330,12 @@ class HeuristicModelSiameseNetwork3(BaseModel):
         seq.add(
             Dense(1, activation="sigmoid")
         )  # Apply sigmoid activation function to get output between 0 and 1
+        # With the sigmoid function :
+        #    Percentage of Explained Preferences on Train Data : 99.463%
+        #    Percentage of Preferences Well Regrouped into Clusters : 73.670%
+        # Without the sigmoid function :
+        #    Percentage of Explained Preferences on Train Data : 98.745%
+        #    Percentage of Preferences Well Regrouped into Clusters : 75.478%
 
         input_a = Input(shape=(self.INPUT_DIM,))
         input_b = Input(shape=(self.INPUT_DIM,))
