@@ -328,7 +328,7 @@ class HeuristicModelSiameseNetwork3(BaseModel):
         seq.add(Dropout(0.1))
         seq.add(Dense(32, activation="relu"))
         seq.add(
-            Dense(1, activation="sigmoid")
+            Dense(1, activation="relu")
         )  # Apply sigmoid activation function to get output between 0 and 1
         # With the sigmoid function :
         #    Percentage of Explained Preferences on Train Data : 99.463%
